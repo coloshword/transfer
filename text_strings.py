@@ -1,53 +1,68 @@
-company_templates = [
-    "{} is one of the leading companies in its industry.",
-    "The headquarters of {} is located in New York.",
-    "Many investors are looking at {} as a potential growth opportunity.",
-    "Recently, {} announced a new partnership with a major tech firm.",
-    "{} has been operating in the market for over 20 years.",
-    "The CEO of {} made a statement about the company’s future.",
-    "Financial analysts predict strong growth for {} this quarter.",
-    "{} is expanding its operations into international markets.",
-    "The stock price of {} has been rising steadily.",
-    "Consumers trust {} for high-quality products and services.",
-    "Last year, {} reported record-breaking revenue.",
-    "A new report suggests that {} is considering a merger.",
-    "{} has been a dominant force in the industry for decades.",
-    "The government is investigating {} for potential antitrust violations.",
-    "Many employees at {} have reported job satisfaction.",
-    "{} recently launched a groundbreaking new product.",
-    "A major lawsuit was filed against {} last month.",
-    "Executives at {} have hinted at a major announcement coming soon.",
-    "{} is known for its strong commitment to sustainability.",
-    "Despite economic downturns, {} continues to perform well.",
-    "Market analysts are closely watching {}’s latest developments.",
-    "In a surprising move, {} acquired a smaller competitor.",
-    "{} is collaborating with universities on new research projects.",
-    "The founder of {} shared insights about the company’s journey.",
-    "Many startups look up to {} as an industry leader.",
-    "{} has secured a multi-billion dollar contract with the government.",
-    "Employees at {} recently organized a union strike.",
-    "The latest ad campaign from {} has gone viral.",
-    "{} has faced criticism for its handling of customer data.",
-    "Shareholders of {} are urging the company to increase dividends.",
-    "Industry experts praise {} for its innovation in the market.",
-    "The annual revenue report from {} exceeded expectations.",
-    "{} was recently recognized as one of the best places to work.",
-    "Reports indicate that {} is planning a major restructuring.",
-    "{} has been accused of unfair business practices by competitors.",
-    "Following a security breach, {} is working to regain customer trust.",
-    "The board of directors at {} voted on a controversial decision.",
-    "Many consumers choose {} over its competitors due to quality.",
-    "The CFO of {} resigned unexpectedly last week.",
-    "{} announced a price reduction on its flagship product.",
-    "The latest research study was funded by {}.",
-    "Developers at {} are working on cutting-edge technology.",
-    "Recently, {} opened a new branch in San Francisco.",
-    "The founder of {} stepped down after decades in leadership.",
-    "A class-action lawsuit has been filed against {}.",
-    "{} is setting new standards for corporate responsibility.",
-    "The branding strategy of {} has been highly effective.",
-    "Customers have expressed concerns about {}’s latest policies.",
-    "{} faced a major setback due to supply chain issues.",
-    "Tech enthusiasts are excited about {}’s new software release.",
-    "Many businesses rely on {} for essential services."
-]
+import torch
+from datasets import Dataset
+from transformers import AutoTokenizer
+
+# Load tokenizer
+tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+
+# Example tokenized data
+sentences = ["A class-action lawsuit has been filed against POSCO."]
+labels = [["O", "O", "O", "O", "O", "O", "O", "O", "O", "B-ORG", "I-ORG", "O"]]  # Word-aligned BIO labels
+
+# Label mapping
+label_map = {"O": 0, "B-ORG": 1, "I-ORG": 2}
+
+# Tokenize and align labels
+def tokenize_and_align_labels(sentence, label_list):
+    tokenized = tokenizer(sentence, truncation=True, padding="max_length", return_tensors="pt", is_split_into_words=False)
+    word_ids = tokenized.word_ids(batch_index=0)  # Align tokens with original words
+    label_ids = []
+
+    previous_word_idx = None
+    for word_idx in word_ids:
+        if word_idx is None:  # CLS/SEP tokens
+            label_ids.append(-100)  # Ignore in loss function
+        elif word_idx != previous_word_idx:  # First subword of a word
+            label_ids.append(label_map[label_list[word_idx]])
+        else:  # Subsequent subwords
+            label_ids.append(label_map[label_list[word_idx]] if label_list[word_idx] != "O" else 0)  # O-labels stay O
+        
+        previous_word_idx = word_idx
+
+    tokenized["labels"] = torch.tensor(label_ids)
+    return tokenized
+
+# Convert dataset
+tokenized_datasets = [tokenize_and_align_labels(sent, lbl) for sent, lbl in zip(sentences, labels)]
+
+# Convert to Hugging Face dataset format
+dataset = Dataset.from_list(tokenized_datasets)
+
+from transformers import AutoModelForTokenClassification, TrainingArguments, Trainer
+
+# Load DistilBERT for token classification (NER)
+model = AutoModelForTokenClassification.from_pretrained("distilbert-base-uncased", num_labels=len(label_map))
+
+# Define training arguments
+training_args = TrainingArguments(
+    output_dir="./ner_model",
+    evaluation_strategy="epoch",
+    save_strategy="epoch",
+    learning_rate=2e-5,
+    per_device_train_batch_size=8,
+    per_device_eval_batch_size=8,
+    num_train_epochs=5,
+    weight_decay=0.01,
+    logging_dir="./logs",
+    logging_steps=10
+)
+
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=dataset,
+    eval_dataset=dataset,  # Use a real validation split in practice
+    tokenizer=tokenizer
+)
+
+trainer.train()
