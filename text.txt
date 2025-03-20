@@ -1,1 +1,43 @@
-https://huggingface.co/unsloth/gemma-3-4b-it-GGUF/resolve/main/gemma-3-4b-it-Q4_K_M.gguf
+import PyPDF2
+import xml.etree.ElementTree as ET
+
+def extract_xfa_xml(pdf_path):
+    with open(pdf_path, "rb") as f:
+        reader = PyPDF2.PdfReader(f)
+        acro_form = reader.trailer["/Root"].get("/AcroForm", {})
+        xfa = acro_form.get("/XFA")
+        if not xfa:
+            return None
+        # XFA is typically an array: [key1, value1, key2, value2, ...]
+        for i in range(0, len(xfa), 2):
+            if xfa[i] == "form":
+                # The value might be a stream; if so, get the data.
+                xml_data = xfa[i+1]
+                if hasattr(xml_data, "get_data"):
+                    xml_data = xml_data.get_data()
+                return xml_data
+    return None
+
+def parse_field_options(xfa_xml):
+    root = ET.fromstring(xfa_xml)
+    fields = {}
+    # Adjust the XPath based on the form’s structure.
+    for field in root.iter("field"):
+        name = field.attrib.get("name")
+        # For dropdowns or checkboxes, look for an 'items' container:
+        items = field.find("items")
+        if items is not None:
+            options = [item.text for item in items.findall("item")]
+            fields[name] = options
+        else:
+            # Assume free text fields return empty list (or you could return '')
+            fields[name] = []
+    return fields
+
+pdf_path = "SAR.pdf"
+xfa_xml = extract_xfa_xml(pdf_path)
+if xfa_xml:
+    field_options = parse_field_options(xfa_xml)
+    print(field_options)
+else:
+    print("No XFA form found.")
