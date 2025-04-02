@@ -41,3 +41,20 @@ if xfa_xml:
     print(field_options)
 else:
     print("No XFA form found.")
+import os, sys
+from lxml import etree
+
+class PyInstallerResolver(etree.Resolver):
+    def resolve(self, url, pubid, context):
+        base_path = getattr(sys, '_MEIPASS', os.path.abspath('.'))
+        full_path = os.path.join(base_path, url)
+        return self.resolve_filename(full_path, context)
+
+parser = etree.XMLParser()
+parser.resolvers.add(PyInstallerResolver())
+
+# Parse your XSD with the custom parser
+schema_doc = etree.parse('myschema.xsd', parser)
+schema = etree.XMLSchema(schema_doc)
+
+# Now you can use `schema` to validate your XML files.
